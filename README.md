@@ -34,6 +34,46 @@ Minimal infrastructure for OTA distribution of already signed Ad Hoc iOS builds:
    - updates GitHub Pages artifact (`index.html`, icons, `current.json`);
    - prints final install URL in job summary.
 
+## One-command automation from local machine
+
+You can use:
+
+- `scripts/publish_ota.sh`
+
+What it does:
+
+1. Takes IPA path argument, or automatically picks newest `*.ipa` from `./drop/`.
+2. Reads metadata from IPA (`app_name`, `bundle_id`, `bundle_version`, `build_number`).
+3. Creates release (or updates existing) and uploads IPA asset.
+4. Triggers `publish-ota.yml` workflow with required inputs.
+5. Optionally watches the workflow run.
+
+Prerequisites:
+
+- `gh` CLI installed and authenticated (`gh auth login`)
+- `unzip` available
+- macOS tool `/usr/libexec/PlistBuddy` (used to read IPA metadata)
+
+Minimal usage:
+
+```bash
+mkdir -p drop
+# copy your exported Ad Hoc IPA into ./drop/
+scripts/publish_ota.sh
+```
+
+Explicit IPA:
+
+```bash
+scripts/publish_ota.sh ./drop/MyApp.ipa
+```
+
+Useful options:
+
+- `--tag v1.2.3` to force release tag
+- `--no-watch` to only dispatch workflow and exit
+- `--app-name`, `--bundle-id`, `--version`, `--build` to override values from IPA
+
 ## Manual setup in GitHub UI
 
 1. Enable GitHub Pages:
