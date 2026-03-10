@@ -1,0 +1,282 @@
+name: Publish OTA Install Page
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: "App display name"
+        required: true
+        type: string
+      bundle_id:
+        description: "Bundle identifier (e.g. com.example.app)"
+        required: true
+        type: string
+      bundle_version:
+        description: "Marketing version (e.g. 1.2.3)"
+        required: true
+        type: string
+      build_number:
+        description: "Build number (e.g. 456)"
+        required: true
+        type: string
+      release_tag:
+        description: "Release tag that already contains IPA asset"
+        required: true
+        type: string
+      ipa_asset_name:
+        description: "IPA asset filename in the release (e.g. MyApp.ipa)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  publish-ota:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    outputs:
+      install_url: ${{ steps.finalize_urls.outputs.install_url }}
+      manifest_url: ${{ steps.resolve_manifest.outputs.manifest_url }}
+      install_page_url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate manual inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          trim() {
+            local v="$1"
+            v="${v#"${v%%[![:space:]]*}"}"
+            v="${v%"${v##*[![:space:]]}"}"
+            printf '%s' "$v"
+          }
+
+          bundle_id="$(trim "${{ inputs.bundle_id }}")"
+          bundle_version="$(trim "${{ inputs.bundle_version }}")"
+          release_tag="$(trim "${{ inputs.release_tag }}")"
+          ipa_asset_name="$(trim "${{ inputs.ipa_asset_name }}")"
+
+          if [[ -z "$bundle_id" ]]; then
+            echo "Input error: bundle_id must not be empty."
+            exit 1
+          fi
+          if [[ -z "$bundle_version" ]]; then
+            echo "Input error: bundle_version must not be empty."
+            exit 1
+          fi
+          if [[ -z "$release_tag" ]]; then
+            echo "Input error: release_tag must not be empty."
+            exit 1
+          fi
+          if [[ -z "$ipa_asset_name" ]]; then
+            echo "Input error: ipa_asset_name must not be empty."
+            exit 1
+          fi
+
+      - name: Resolve release and IPA asset
+        id: resolve_release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          IPA_ASSET_NAME: ${{ inputs.ipa_asset_name }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = process.env.RELEASE_TAG;
+            const ipaAssetName = process.env.IPA_ASSET_NAME;
+
+            let release;
+            try {
+              const response = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag,
+              });
+              release = response.data;
+            } catch (error) {
+              if (error.status === 404) {
+                throw new Error(`Release with tag "${tag}" was not found.`);
+              }
+              throw error;
+            }
+
+            if (release.draft) {
+              throw new Error(`Release "${tag}" is a draft. Publish it before OTA deployment.`);
+            }
+            if (release.prerelease) {
+              throw new Error(`Release "${tag}" is marked as prerelease. Use a stable release for OTA deployment.`);
+            }
+
+            const ipaAsset = release.assets.find((asset) => asset.name === ipaAssetName);
+            if (!ipaAsset) {
+              const names = release.assets.map((asset) => asset.name).join(", ");
+              throw new Error(
+                `IPA asset "${ipaAssetName}" was not found in release "${tag}". Available assets: ${names || "(none)"}`
+              );
+            }
+
+            core.setOutput("release_id", String(release.id));
+            core.setOutput("release_url", release.html_url);
+            core.setOutput("release_tag", release.tag_name);
+            core.setOutput("release_published_at", release.published_at || release.created_at || "");
+            core.setOutput("ipa_url", ipaAsset.browser_download_url);
+
+      - name: Derive public Pages and icon URLs
+        id: derive_urls
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER}"
+          repo="${GITHUB_REPOSITORY#*/}"
+
+          if [[ "$repo" == "${owner}.github.io" ]]; then
+            pages_base_url="https://${owner}.github.io"
+          else
+            pages_base_url="https://${owner}.github.io/${repo}"
+          fi
+
+          echo "pages_base_url=${pages_base_url}" >> "$GITHUB_OUTPUT"
+          echo "icon57_url=${pages_base_url}/assets/icon57.png" >> "$GITHUB_OUTPUT"
+          echo "icon512_url=${pages_base_url}/assets/icon512.png" >> "$GITHUB_OUTPUT"
+
+      - name: Generate manifest.plist
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python3 scripts/generate_manifest.py \
+            --app-name "${{ inputs.app_name }}" \
+            --bundle-id "${{ inputs.bundle_id }}" \
+            --bundle-version "${{ inputs.bundle_version }}" \
+            --ipa-url "${{ steps.resolve_release.outputs.ipa_url }}" \
+            --icon57-url "${{ steps.derive_urls.outputs.icon57_url }}" \
+            --icon512-url "${{ steps.derive_urls.outputs.icon512_url }}" \
+            --output "out/manifest.plist"
+
+      - name: Upload manifest asset to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ inputs.release_tag }}" out/manifest.plist#manifest.plist --clobber
+
+      - name: Resolve manifest asset URL
+        id: resolve_manifest
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const tag = process.env.RELEASE_TAG;
+            const response = await github.rest.repos.getReleaseByTag({
+              owner,
+              repo,
+              tag,
+            });
+            const manifest = response.data.assets.find((asset) => asset.name === "manifest.plist");
+            if (!manifest) {
+              throw new Error(`manifest.plist was not found in release "${tag}" after upload.`);
+            }
+            core.setOutput("manifest_url", manifest.browser_download_url);
+
+      - name: Prepare current site metadata
+        shell: bash
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+          BUNDLE_VERSION: ${{ inputs.bundle_version }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          RELEASE_TAG: ${{ steps.resolve_release.outputs.release_tag }}
+          RELEASE_URL: ${{ steps.resolve_release.outputs.release_url }}
+          RELEASE_PUBLISHED_AT: ${{ steps.resolve_release.outputs.release_published_at }}
+          IPA_URL: ${{ steps.resolve_release.outputs.ipa_url }}
+          MANIFEST_URL: ${{ steps.resolve_manifest.outputs.manifest_url }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+
+          current = {
+              "app_name": os.environ["APP_NAME"],
+              "bundle_version": os.environ["BUNDLE_VERSION"],
+              "build_number": os.environ["BUILD_NUMBER"],
+              "release_tag": os.environ["RELEASE_TAG"],
+              "release_url": os.environ["RELEASE_URL"],
+              "release_published_at": os.environ["RELEASE_PUBLISHED_AT"],
+              "ipa_url": os.environ["IPA_URL"],
+              "manifest_url": os.environ["MANIFEST_URL"],
+              "generated_at": datetime.now(timezone.utc).isoformat(),
+          }
+
+          with open("out/current.json", "w", encoding="utf-8") as f:
+              json.dump(current, f, ensure_ascii=False, indent=2)
+          PY
+
+      - name: Build Pages artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf pages
+          mkdir -p pages/assets
+          cp site/index.html pages/index.html
+          cp site/assets/icon57.png pages/assets/icon57.png
+          cp site/assets/icon512.png pages/assets/icon512.png
+          cp out/current.json pages/current.json
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+
+      - name: Deploy GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: Build install URL
+        id: finalize_urls
+        shell: bash
+        env:
+          MANIFEST_URL: ${{ steps.resolve_manifest.outputs.manifest_url }}
+        run: |
+          set -euo pipefail
+          encoded_manifest_url="$(python3 - <<'PY'
+          import os
+          import urllib.parse
+          print(urllib.parse.quote(os.environ["MANIFEST_URL"], safe=""))
+          PY
+          )"
+          install_url="itms-services://?action=download-manifest&url=${encoded_manifest_url}"
+          echo "install_url=${install_url}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish job summary
+        shell: bash
+        run: |
+          {
+            echo "## OTA publish completed"
+            echo
+            echo "- App: \`${{ inputs.app_name }}\`"
+            echo "- Version: \`${{ inputs.bundle_version }}\`"
+            echo "- Build: \`${{ inputs.build_number }}\`"
+            echo "- Release: [${{ steps.resolve_release.outputs.release_tag }}](${{ steps.resolve_release.outputs.release_url }})"
+            echo "- Manifest URL: [manifest.plist](${{ steps.resolve_manifest.outputs.manifest_url }})"
+            echo "- Install page URL: [Open install page](${{ steps.deploy.outputs.page_url }})"
+            echo "- Install URL:"
+            echo '```'
+            echo "${{ steps.finalize_urls.outputs.install_url }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

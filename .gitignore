@@ -1,0 +1,24 @@
+# macOS
+.DS_Store
+
+# iOS / Xcode artifacts
+DerivedData/
+build/
+*.xcarchive
+*.xcresult
+*.dSYM
+*.dSYM.zip
+*.app
+*.ipa
+
+# Swift Package Manager
+.build/
+
+# Xcode user data
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+xcuserdata/
+
+# Temporary workflow outputs
+out/
+pages/

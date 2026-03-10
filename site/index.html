@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OTA Install</title>
+    <style>
+      :root {
+        --bg: #f7f7f8;
+        --fg: #121212;
+        --muted: #6d6d72;
+        --card: #ffffff;
+        --border: #e6e6ea;
+        --primary: #0a84ff;
+      }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      main {
+        max-width: 560px;
+        margin: 32px auto;
+        padding: 0 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+      }
+      h1 {
+        margin: 0 0 6px;
+        font-size: 24px;
+      }
+      .meta {
+        margin: 12px 0;
+      }
+      .meta p {
+        margin: 6px 0;
+      }
+      .buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 18px;
+      }
+      .btn {
+        display: inline-block;
+        padding: 10px 14px;
+        border-radius: 10px;
+        text-decoration: none;
+        border: 1px solid var(--border);
+        color: var(--fg);
+        background: #fff;
+      }
+      .btn.primary {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: #fff;
+      }
+      .warning {
+        margin-top: 18px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      @media (max-width: 480px) {
+        main {
+          margin: 20px auto;
+        }
+        .card {
+          padding: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <h1 id="app-name">OTA Install</h1>
+        <p class="muted">Current release information is loaded from <code>current.json</code>.</p>
+
+        <div class="meta">
+          <p>Version: <strong id="app-version">-</strong></p>
+          <p>Build: <strong id="build-number">-</strong></p>
+          <p>Published: <strong id="published-at">-</strong></p>
+          <p>
+            Release: <a id="release-link" href="#" target="_blank" rel="noopener noreferrer">-</a>
+          </p>
+        </div>
+
+        <div class="buttons">
+          <a class="btn primary" id="install-link" href="#">Install</a>
+          <a class="btn" id="ipa-link" href="#" target="_blank" rel="noopener noreferrer">Download IPA</a>
+        </div>
+
+        <p class="warning">
+          Installation works only on devices included in the Ad Hoc provisioning profile.
+        </p>
+      </section>
+    </main>
+
+    <script>
+      function formatDate(iso) {
+        if (!iso) return "-";
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return iso;
+        return d.toLocaleString();
+      }
+
+      function setText(id, value) {
+        document.getElementById(id).textContent = value || "-";
+      }
+
+      function setLink(id, href, text) {
+        const el = document.getElementById(id);
+        if (!href) {
+          el.removeAttribute("href");
+          el.classList.add("muted");
+          el.textContent = text || "-";
+          return;
+        }
+        el.href = href;
+        if (text) el.textContent = text;
+      }
+
+      async function loadCurrent() {
+        const response = await fetch("./current.json", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`Failed to load current.json (${response.status})`);
+        }
+        const current = await response.json();
+
+        setText("app-name", current.app_name || "OTA Install");
+        setText("app-version", current.bundle_version);
+        setText("build-number", current.build_number);
+        setText("published-at", formatDate(current.release_published_at));
+        setLink("release-link", current.release_url, current.release_tag || "Open release");
+        setLink("ipa-link", current.ipa_url, "Download IPA");
+
+        const installLink = document.getElementById("install-link");
+        if (current.manifest_url) {
+          installLink.href =
+            "itms-services://?action=download-manifest&url=" +
+            encodeURIComponent(current.manifest_url);
+        } else {
+          installLink.removeAttribute("href");
+          installLink.classList.remove("primary");
+          installLink.textContent = "Install (unavailable)";
+        }
+      }
+
+      loadCurrent().catch((err) => {
+        console.error(err);
+        const installLink = document.getElementById("install-link");
+        installLink.removeAttribute("href");
+        installLink.classList.remove("primary");
+        installLink.textContent = "Install (unavailable)";
+        setText("published-at", "Failed to load release metadata");
+      });
+    </script>
+  </body>
+</html>
