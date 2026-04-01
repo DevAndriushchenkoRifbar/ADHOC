@@ -1,5 +1,6 @@
 {
   "app_name": "Not published yet",
+  "bundle_id": "com.codxxx.COD",
   "bundle_version": "-",
   "build_number": "-",
   "release_tag": "-",
@@ -7,5 +8,6 @@
   "release_published_at": "",
   "ipa_url": "",
   "manifest_url": "",
+  "release_notes": "",
   "generated_at": ""
 }

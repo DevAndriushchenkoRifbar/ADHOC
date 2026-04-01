@@ -14,17 +14,19 @@ Minimal infrastructure for OTA distribution of already signed Ad Hoc iOS builds:
 - `site/index.html` - static install page.
 - `site/assets/icon57.png`, `site/assets/icon512.png` - icons for manifest.
 - `site/current.json` - metadata consumed by install page (overwritten by workflow).
+- `site/current.json` may also contain human-readable release notes shown on install page.
 
 ## How it works
 
 1. You create or open a GitHub Release and upload your `.ipa` as an asset.
 2. You run `Publish OTA Install Page` workflow manually (`workflow_dispatch`) with inputs:
    - `app_name`
-   - `bundle_id`
+   - `bundle_id` (`com.codxxx.COD`)
    - `bundle_version`
    - `build_number`
    - `release_tag`
    - `ipa_asset_name`
+   - optional `release_notes_b64`
 3. Workflow:
    - finds release by `release_tag`;
    - validates release is not `draft` and not `prerelease`;
@@ -68,11 +70,21 @@ Explicit IPA:
 scripts/publish_ota.sh ./drop/MyApp.ipa
 ```
 
+Explicit IPA with update notes shown on install page:
+
+```bash
+scripts/publish_ota.sh ./drop/MyApp.ipa --notes-file ./release-notes.txt
+```
+
 Useful options:
 
 - `--tag v1.2.3` to force release tag
 - `--no-watch` to only dispatch workflow and exit
 - `--app-name`, `--bundle-id`, `--version`, `--build` to override values from IPA
+- `--notes "..."` to attach human-readable update text to install page
+- `--notes-file ./release-notes.txt` to read update text from file
+
+Bundle identifier is expected to be exactly `com.codxxx.COD`. Local script and GitHub Actions workflow will reject any other value.
 
 ## Manual setup in GitHub UI
 

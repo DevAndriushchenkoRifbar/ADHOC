@@ -27,6 +27,10 @@ on:
         description: "IPA asset filename in the release (e.g. MyApp.ipa)"
         required: true
         type: string
+      release_notes_b64:
+        description: "Optional base64-encoded release notes shown on install page"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -67,6 +71,10 @@ jobs:
 
           if [[ -z "$bundle_id" ]]; then
             echo "Input error: bundle_id must not be empty."
+            exit 1
+          fi
+          if [[ "$bundle_id" != "com.codxxx.COD" ]]; then
+            echo "Input error: bundle_id must be com.codxxx.COD."
             exit 1
           fi
           if [[ -z "$bundle_version" ]]; then
@@ -194,6 +202,7 @@ jobs:
         shell: bash
         env:
           APP_NAME: ${{ inputs.app_name }}
+          BUNDLE_ID: ${{ inputs.bundle_id }}
           BUNDLE_VERSION: ${{ inputs.bundle_version }}
           BUILD_NUMBER: ${{ inputs.build_number }}
           RELEASE_TAG: ${{ steps.resolve_release.outputs.release_tag }}
@@ -201,15 +210,23 @@ jobs:
           RELEASE_PUBLISHED_AT: ${{ steps.resolve_release.outputs.release_published_at }}
           IPA_URL: ${{ steps.resolve_release.outputs.ipa_url }}
           MANIFEST_URL: ${{ steps.resolve_manifest.outputs.manifest_url }}
+          RELEASE_NOTES_B64: ${{ inputs.release_notes_b64 }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import base64
           import json
           import os
           from datetime import datetime, timezone
 
+          release_notes_b64 = os.environ.get("RELEASE_NOTES_B64", "").strip()
+          release_notes = ""
+          if release_notes_b64:
+              release_notes = base64.b64decode(release_notes_b64).decode("utf-8").strip()
+
           current = {
               "app_name": os.environ["APP_NAME"],
+              "bundle_id": os.environ["BUNDLE_ID"],
               "bundle_version": os.environ["BUNDLE_VERSION"],
               "build_number": os.environ["BUILD_NUMBER"],
               "release_tag": os.environ["RELEASE_TAG"],
@@ -217,6 +234,7 @@ jobs:
               "release_published_at": os.environ["RELEASE_PUBLISHED_AT"],
               "ipa_url": os.environ["IPA_URL"],
               "manifest_url": os.environ["MANIFEST_URL"],
+              "release_notes": release_notes,
               "generated_at": datetime.now(timezone.utc).isoformat(),
           }
 
